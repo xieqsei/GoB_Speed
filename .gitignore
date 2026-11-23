@@ -5,5 +5,6 @@ ZScripts/GoB_Import_Settings.zvr
 .idea
 .zed
 /tests/
-# 本地 AI 协作数据（工作日志/记忆），不入库
+# 本地打包脚本与 AI 协作数据，不入库
+build/
 .workbuddy/
