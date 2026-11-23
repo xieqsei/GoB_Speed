@@ -7,4 +7,5 @@ ZScripts/GoB_Import_Settings.zvr
 /tests/
 # 本地打包脚本与 AI 协作数据，不入库
 build/
+dist/
 .workbuddy/
