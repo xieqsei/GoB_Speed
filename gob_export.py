@@ -32,6 +32,20 @@ _EXPORT_VERTEX_CHUNK = 1_000_000
 _EXPORT_FACE_CHUNK = 500_000
 
 
+def _normalized_project_path():
+    """项目路径统一补上结尾分隔符。
+
+    导出端用字符串拼接 ``PATH_PROJECT + 对象名``，首选项里手填的目录路径
+    若没有结尾斜杠，会拼出 ``.../Default中模体型5`` 这种无效路径
+    （ZBrush 也读取同一路径写进 GoZ_ProjectPath.txt）。
+    """
+
+    path = utils.get_project_path()
+    if path and not path.endswith(("/", "\\")):
+        path += "/"
+    return path
+
+
 def _mesh_topology_arrays(mesh):
     face_count = len(mesh.polygons)
     loop_starts = np.empty(face_count, dtype=np.int32)
@@ -59,7 +73,7 @@ class GoB_OT_export(Operator):
         return geometry.export_poll(cls, context)
 
     def exportGoZ(self, scn, obj, path_export):
-        PATH_PROJECT = utils.get_project_path()
+        PATH_PROJECT = _normalized_project_path()
         if utils.prefs().performance_profiling:
             print("\n", 100*"=")
             start_time = utils.profiler(time.perf_counter(), "Export Profiling: " + obj.name)
@@ -137,11 +151,11 @@ class GoB_OT_export(Operator):
         if utils.prefs().performance_profiling:
             start_time = utils.profiler(start_time, "variablesFile: Write GoB_variables")
 
-        try:
-            object_name_bytes = obj.name.encode('ascii')
-        except UnicodeEncodeError:
-            self.escape_object_name(obj)
-            object_name_bytes = obj.name.encode('ascii')
+        # 名称按 UTF-8 字节数写入（中文名一个字符占 3 字节）。
+        # 上游按 ASCII 编码并在失败时自动重命名对象，会破坏中文名，
+        # 实测 ZBrush 2026 与两个导入器都能正确读取 UTF-8 名称块，
+        # 因此这里保留原始名称、不再改名。
+        object_name_bytes = obj.name.encode('utf-8')
 
         with open(os.path.join(path_export + '/{0}.GoZ'.format(obj.name)), 'wb') as goz_file:
             numFaces = len(mesh_tmp.polygons)
@@ -589,7 +603,7 @@ class GoB_OT_export(Operator):
 
         paths.set_goz_path_from_preferences()
 
-        PATH_PROJECT = utils.get_project_path()
+        PATH_PROJECT = _normalized_project_path()
 
         try:
             source_GoZ_Info = os.path.join(paths.PATH_GOB, "Blender")
@@ -664,12 +678,18 @@ class GoB_OT_export(Operator):
 
                     if len(mesh_tmp.polygons):
                         print("GoB: ", obj_tmp.name, mesh_tmp.name, len(mesh_tmp.polygons), sep=' / ')
-                        self.escape_object_name(obj_tmp)
                         self.exportGoZ(context.scene, obj_tmp, f'{PATH_PROJECT}')
                         with open( f"{PATH_PROJECT}{obj_tmp.name}.ztn", 'wt') as ztn:
                             ztn.write(f'{PATH_PROJECT}{obj_tmp.name}')
                         GoZ_ObjectList.write(f'{PATH_PROJECT}{obj_tmp.name}\n')
                         bpy.data.meshes.remove(mesh_tmp)
+                    else:
+                        # 转换后无面（例如没开倒角/挤出的曲线），ZBrush 无法导入，
+                        # 提示用户而不是静默跳过，同时清掉临时网格
+                        bpy.data.meshes.remove(mesh_tmp)
+                        ui.ShowReport(self, ["Object: ", obj.name],
+                                      "GoB: 该对象转换后无面，无法导出到 ZBrush",
+                                      'COLORSET_01_VEC')
 
                 elif obj.type in {'MESH'}:
                     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -688,7 +708,6 @@ class GoB_OT_export(Operator):
                             bpy.ops.geometry.color_attribute_convert(domain='POINT', data_type='FLOAT_COLOR')
                             obj.data.update()
 
-                        self.escape_object_name(obj)
                         self.exportGoZ(context.scene, obj, f'{PATH_PROJECT}')
                         with open( f"{PATH_PROJECT}{obj.name}.ztn", 'wt') as ztn:
                             ztn.write(f'{PATH_PROJECT}{obj.name}')
@@ -725,23 +744,3 @@ class GoB_OT_export(Operator):
             bpy.ops.object.mode_set(mode=currentContext)
 
         return {'FINISHED'}
-
-    def escape_object_name(self, obj):
-        import re
-
-        original_name = obj.name
-        new_name = re.sub(r'[^A-Za-z0-9_-]+', '_', original_name)
-        new_name = re.sub(r'_+', '_', new_name).strip('_-')
-
-        if not new_name:
-            new_name = "Object"
-
-        if new_name == original_name:
-            return
-
-        base_name = new_name
-        i = 0
-        while new_name in bpy.data.objects and bpy.data.objects[new_name] != obj:
-            new_name = f"{base_name}_{i:02d}"
-            i += 1
-        obj.name = new_name

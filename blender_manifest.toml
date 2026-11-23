@@ -1,10 +1,12 @@
 # https://docs.blender.org/manual/en/dev/advanced/extensions/index.html
 schema_version = "1.0.0"
 id = "gob"
-name = "GoB"
+name = "Gob_Speed (GoB 分支版)"
+# 版本号跟随上游主线（4.5.3）；manifest 的 version 只允许纯 X.Y.Z，
+# 分支标识 "-Speed" 体现在 utils.gob_version() 的版本字符串里（插件名用分支名 Gob_Speed）。
 version = "4.5.3"
-tagline = "GoB providing a bridge between ZBrush and Blender"
-maintainer = "Daniel Grauer (kromar) and Jamie Phipps (Boozebeard)"
+tagline = "ZBrush 与 Blender 桥接，Gob_Speed 分支版含 S导入与临时数据管理"
+maintainer = "Daniel Grauer (kromar), Jamie Phipps (Boozebeard) / Gob_Speed 分支"
 type = "add-on"
 tags = ["Import-Export"]
 blender_version_min = "4.2.0"
@@ -12,7 +14,7 @@ license = ["SPDX:GPL-3.0-or-later"]
 website = "https://github.com/JoseConseco/GoB/wiki"
 copyright = ["2024 Jose Conseco", "2024 Daniel Grauer (kromar)"]
 [permissions]
-  files = "Requires access to deploy Zbrush configuration files"
+  files = "Write GoZ config files and clean the GoZ exchange folders"
 [build]
   paths_exclude_pattern = [
   ".git",
@@ -26,4 +28,5 @@ copyright = ["2024 Jose Conseco", "2024 Daniel Grauer (kromar)"]
   "ZScripts/GoB_Import_Settings.zvr",
   "build",
   "tests",
+  "docs",
   ]

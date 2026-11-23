@@ -17,10 +17,10 @@
 # ##### END GPL LICENSE BLOCK #####
 
 import bpy
+import sys
 import time
 import numpy
 import random
-import addon_utils
 import platform
 
 
@@ -121,9 +121,27 @@ def migrate_legacy_pixologic_path(preferences, system=None):
 
 
 def gob_version():
-    return str([addon.bl_info.get('version', (-1,-1,-1)) for addon in addon_utils.modules() if addon.bl_info.get('name','') == 'GoB'][0])
-     
-    
+    """当前插件版本字符串（含分支标识），写入 GoZ 变量文件。
+
+    作为扩展安装时 Blender 不注入 bl_info，而且 addons[...].module 拿到的是
+    包装模块，所以直接从 sys.modules 取本包模块里的 VERSION_STRING。
+    """
+
+    module = sys.modules.get(__package__)
+    version_string = getattr(module, 'VERSION_STRING', '') if module else ''
+    if version_string:
+        return version_string
+
+    bl_info = getattr(module, 'bl_info', None) or {}
+    version = bl_info.get('version')
+    if not version:
+        return 'unknown'
+
+    base = '.'.join(str(part) for part in version)
+    branch_tag = getattr(module, 'BRANCH_TAG', '')
+    return f'{base}-{branch_tag}' if branch_tag else base
+
+
 def max_list_value(list):
     """ retrun biggest value of a list"""
     i = numpy.argmax(list)

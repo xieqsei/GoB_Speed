@@ -1,5 +1,9 @@
-﻿__pycache__
+__pycache__/
+*.pyc
+*.pyo
 ZScripts/GoB_Import_Settings.zvr
 .idea
 .zed
 /tests/
+# 本地 AI 协作数据（工作日志/记忆），不入库
+.workbuddy/

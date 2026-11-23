@@ -515,16 +515,11 @@ def check_export_candidates(obj):
             numFaces = len(obj.data.polygons)
             #print("numfaces 2 modifier export: ", numFaces)
 
-    elif obj.type in {'SURFACE', 'FONT', 'META'}:
-        #allow export for non mesh type objects
+    elif obj.type in {'SURFACE', 'FONT', 'META', 'CURVE'}:
+        # 曲线/曲面/文字/元球等非网格对象允许进入导出流程。
+        # 上游 4.5.3 改为「曲线必须有倒角/挤出才可导出」，会把按钮直接禁用；
+        # 分支版保留原行为，在导出时判断转换后是否有面，无面则弹窗说明原因。
         return True
-
-    elif obj.type in {'CURVE'}:
-        # curves will only get faces when they have a bevel or a extrude
-        return bool(
-            bpy.data.curves[obj.data.name].bevel_depth
-            or bpy.data.curves[obj.data.name].extrude
-        )
     else:
         if utils.prefs().debug_output:
             print("GoB: unsupported object type:", obj.type)

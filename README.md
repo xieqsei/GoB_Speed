@@ -1,6 +1,17 @@
-# GoB
+# Gob_Speed (GoB 分支版)
 
 GoZ-alike tools for simple ZBrush<->Blender interchange.
+
+本仓库是 GoB 的 **Gob_Speed 分支**：版本号跟随上游主线，后缀 `-Speed` 标明分支身份
+（当前 `4.5.3-Speed`，基线上游 v4.5.3）。
+
+分支在保留上游全部功能的基础上额外提供：
+
+* **S导入**：向量化 `.GoZ` 解析，大网格导入更快（原版导入保持不变）
+* **临时数据管理**子面板：统计 GoZ 中转目录占用、按白名单清理临时文件
+* 中文对象名、UV 按面配对的可靠性修复
+
+更新日志与专项说明见 [`docs/`](docs/)：`docs/CHANGELOG.md` 为总日志。
 
 ## Features
 You can transfer:

@@ -18,7 +18,6 @@
 
 import os
 import random
-import string
 import time
 from struct import unpack_from
 
@@ -202,15 +201,16 @@ def _read_goz_object_name(goz_file, operator):
         )
         decoded_name = name_bytes.decode("utf-8", errors="ignore")
 
+    # 只剔除控制字符与 NUL，保留中文等非 ASCII 字符。
+    # 上游用 string.printable 过滤会把中文名整段丢掉（“中模体型5” 只剩 “5”）。
     object_name = "".join(
-        letter for letter in decoded_name if letter in string.printable
-    ).strip("\x00")
+        letter
+        for letter in decoded_name
+        if letter.isprintable() and letter != "\x00"
+    ).strip()
     if not object_name:
-        _report_import_warning(
-            operator,
-            "Object name is empty; the object was not imported.",
-        )
-        return None
+        object_name = "GoZ_Mesh"
+
     return object_name
 
 
@@ -348,6 +348,65 @@ def _decode_face_data(faces_data):
         count=int(loop_totals.sum(dtype=np.int64)),
     )
     return loop_starts, loop_totals, loop_vertices
+
+
+def _pair_uvs_to_mesh(me, faces_data, uv_records):
+    """按「面的顶点序列」把 .GoZ 的面与网格面配对，返回 loop 索引与 UV。
+
+    网格面数少于文件面数时（``me.validate()`` 删掉了退化面或重复面，例如
+    519073 面的 Merged_model 会删 31 个），按面序连续写入会让删除点之后的
+    所有面 UV 错位。实测「中模体型5.GoZ」的内部边 UV 一致率会从 98.8% 掉到
+    6%，且不会报错。改成按顶点元组配对后，被丢弃的面只影响其自身。
+
+    Returns:
+        (np.ndarray, np.ndarray) 或 (None, None)：
+        loop 索引数组，以及与之等长的 (N, 2) UV 数组。
+    """
+    file_loop_starts, file_loop_totals, file_loop_vertices = _decode_face_data(
+        faces_data
+    )
+
+    polygon_count = len(me.polygons)
+    mesh_loop_starts = np.empty(polygon_count, dtype=np.int32)
+    mesh_loop_totals = np.empty(polygon_count, dtype=np.int32)
+    me.polygons.foreach_get("loop_start", mesh_loop_starts)
+    me.polygons.foreach_get("loop_total", mesh_loop_totals)
+    mesh_loop_vertices = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", mesh_loop_vertices)
+
+    # 网格面：顶点序列 -> [(loop 起点, loop 数), ...]
+    # 顶点序列完全相同的重复面共存于同一键下，按出现顺序依次取用
+    buckets = {}
+    for polygon in range(polygon_count):
+        start = int(mesh_loop_starts[polygon])
+        total = int(mesh_loop_totals[polygon])
+        key = tuple(int(v) for v in mesh_loop_vertices[start:start + total])
+        buckets.setdefault(key, []).append((start, total))
+
+    corners = np.arange(4, dtype=np.int32)
+    used = {}
+    loop_indices = []
+    uv_rows = []
+    for face_index in range(len(file_loop_totals)):
+        start = int(file_loop_starts[face_index])
+        total = int(file_loop_totals[face_index])
+        key = tuple(int(v) for v in file_loop_vertices[start:start + total])
+        entries = buckets.get(key)
+        if not entries:
+            continue
+        position = used.get(key, 0)
+        if position >= len(entries):
+            continue
+        used[key] = position + 1
+        mesh_start, mesh_total = entries[position]
+        keep = corners < mesh_total
+        loop_indices.append(mesh_start + corners[keep])
+        uv_rows.append(uv_records[face_index][:min(mesh_total, 4)])
+
+    if not loop_indices:
+        return None, None
+    return np.concatenate(loop_indices), np.concatenate(uv_rows)
+
 
 
 class GoB_OT_import(Operator):
@@ -719,7 +778,7 @@ class GoB_OT_import(Operator):
                             uv_payload,
                             dtype="<f4",
                             count=payload_face_count * 8,
-                        ).reshape((-1, 4, 2))[:import_face_count].copy()
+                        ).reshape((-1, 4, 2)).copy()
                         if utils.prefs().import_uv_flip_x:
                             uv_records[:, :, 0] = 1.0 - uv_records[:, :, 0]
                         if utils.prefs().import_uv_flip_y:
@@ -731,22 +790,34 @@ class GoB_OT_import(Operator):
                         me.polygons.foreach_get("loop_start", loop_starts)
                         me.polygons.foreach_get("loop_total", loop_totals)
 
-                        imported_loop_totals = loop_totals[:import_face_count]
-                        if np.any(imported_loop_totals > 4):
-                            _report_import_warning(
-                                self,
-                                "UV data contains four corners per face; only the "
-                                "first four corners of an n-gon can be imported.",
+                        if polygon_count != len(facesData):
+                            # 面被 me.validate() 删过，面序不再与文件一致：
+                            # 按顶点序列配对，避免 UV 整体错位
+                            mesh_loop_indices, imported_uvs = _pair_uvs_to_mesh(
+                                me, facesData, uv_records
                             )
+                            if mesh_loop_indices is None:
+                                mesh_loop_indices = np.empty(0, dtype=np.int32)
+                                imported_uvs = np.empty((0, 2), dtype=np.float32)
+                        else:
+                            uv_records = uv_records[:import_face_count]
+                            imported_loop_totals = loop_totals[:import_face_count]
+                            if np.any(imported_loop_totals > 4):
+                                _report_import_warning(
+                                    self,
+                                    "UV data contains four corners per face; only the "
+                                    "first four corners of an n-gon can be imported.",
+                                )
 
-                        corners = np.arange(4, dtype=np.int32)
-                        valid_corners = (
-                            corners[None, :] < imported_loop_totals[:, None]
-                        )
-                        mesh_loop_indices = (
-                            loop_starts[:import_face_count, None] + corners[None, :]
-                        )[valid_corners]
-                        imported_uvs = uv_records[valid_corners]
+                            corners = np.arange(4, dtype=np.int32)
+                            valid_corners = (
+                                corners[None, :] < imported_loop_totals[:, None]
+                            )
+                            mesh_loop_indices = (
+                                loop_starts[:import_face_count, None]
+                                + corners[None, :]
+                            )[valid_corners]
+                            imported_uvs = uv_records[valid_corners]
 
                         loop_uvs = np.zeros(
                             len(uv_layer.data) * 2, dtype=np.float32
